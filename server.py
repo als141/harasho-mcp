@@ -6,6 +6,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 # streamable_http_path="/" so Cloud Run root URL is the MCP endpoint.
 mcp = FastMCP(
@@ -59,6 +61,24 @@ def get_product_image_url(product_page_url: str) -> str:
 
 # ASGI app for FastMCP; served by uvicorn.
 app = mcp.streamable_http_app()
+
+
+# Bearer-token auth using env var MCP_AUTH_TOKEN. If the variable is unset,
+# auth is effectively disabled (useful for local dev).
+EXPECTED_TOKEN = os.environ.get("MCP_AUTH_TOKEN")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):  # type: ignore[override]
+        if EXPECTED_TOKEN:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header != f"Bearer {EXPECTED_TOKEN}":
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+        return await call_next(request)
+
+
+app.add_middleware(AuthMiddleware)
 
 
 if __name__ == "__main__":
